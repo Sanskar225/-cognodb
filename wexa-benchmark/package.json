@@ -1,0 +1,28 @@
+{
+  "name": "cognodb-graph-benchmark",
+  "version": "1.0.0",
+  "description": "Fair benchmark of CognoDB Cloud vs Neo4j Aura, Memgraph, FalkorDB, ArangoDB on an identical dataset and workloads.",
+  "type": "module",
+  "scripts": {
+    "prepare-dataset": "node scripts/prepare-dataset.js",
+    "load:cognodb": "node src/loaders/loadBoltDB.js cognodb",
+    "load:neo4j": "node src/loaders/loadBoltDB.js neo4j",
+    "load:memgraph": "node src/loaders/loadBoltDB.js memgraph",
+    "load:falkordb": "node src/loaders/loadFalkorDB.js",
+    "load:arangodb": "node src/loaders/loadArangoDB.js",
+    "bench:cognodb": "node src/benchmarks/runBenchmark.js cognodb",
+    "bench:neo4j": "node src/benchmarks/runBenchmark.js neo4j",
+    "bench:memgraph": "node src/benchmarks/runBenchmark.js memgraph",
+    "bench:falkordb": "node src/benchmarks/runBenchmark.js falkordb",
+    "bench:arangodb": "node src/benchmarks/runBenchmark.js arangodb",
+    "bench:all": "node src/benchmarks/runAll.js",
+    "report": "node src/utils/report.js"
+  },
+  "dependencies": {
+    "neo4j-driver": "^5.24.0",
+    "falkordb": "^6.7.0",
+    "arangojs": "^9.2.0",
+    "dotenv": "^16.4.5",
+    "csv-parse": "^5.5.6"
+  }
+}
