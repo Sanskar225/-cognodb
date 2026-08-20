@@ -10,6 +10,12 @@ function loadJson(path) {
   }
 }
 
+function fmt(entry) {
+  if (!entry) return "N/A";
+  if (entry.failed) return "FAILED (see caveats)";
+  return `${entry.p50} / ${entry.p95}`;
+}
+
 function row(label, getter) {
   const cells = platforms.map((p) => {
     const bench = loadJson(`results/${p}-bench.json`);
@@ -26,13 +32,15 @@ lines.push(`|---|${platforms.map(() => "---").join("|")}|`);
 lines.push(row("Load time (ms)", ({ load }) => load?.totalLoadMs));
 lines.push(row("Nodes/sec", ({ load }) => load?.nodesPerSec));
 lines.push(row("Relationships/sec", ({ load }) => load?.relsPerSec));
-lines.push(row("1-hop p50/p95 (ms)", ({ bench }) => bench && `${bench.hop1.p50} / ${bench.hop1.p95}`));
-lines.push(row("2-hop p50/p95 (ms)", ({ bench }) => bench && `${bench.hop2.p50} / ${bench.hop2.p95}`));
-lines.push(row("3-hop p50/p95 (ms)", ({ bench }) => bench && `${bench.hop3.p50} / ${bench.hop3.p95}`));
-lines.push(row("Point lookup p50/p95 (ms)", ({ bench }) => bench && `${bench.pointLookup.p50} / ${bench.pointLookup.p95}`));
-lines.push(row("Indexed lookup p50/p95 (ms)", ({ bench }) => bench && `${bench.indexedLookup.p50} / ${bench.indexedLookup.p95}`));
-lines.push(row("Aggregation p50/p95 (ms)", ({ bench }) => bench && `${bench.aggregation.p50} / ${bench.aggregation.p95}`));
-lines.push(row("Mixed workload throughput (ops/s)", ({ bench }) => bench?.mixedWorkload?.throughputOpsPerSec));
+lines.push(row("1-hop p50/p95 (ms)", ({ bench }) => bench && fmt(bench.hop1)));
+lines.push(row("2-hop p50/p95 (ms)", ({ bench }) => bench && fmt(bench.hop2)));
+lines.push(row("3-hop p50/p95 (ms)", ({ bench }) => bench && fmt(bench.hop3)));
+lines.push(row("Point lookup p50/p95 (ms)", ({ bench }) => bench && fmt(bench.pointLookup)));
+lines.push(row("Indexed lookup p50/p95 (ms)", ({ bench }) => bench && fmt(bench.indexedLookup)));
+lines.push(row("Aggregation p50/p95 (ms)", ({ bench }) => bench && fmt(bench.aggregation)));
+lines.push(row("Mixed workload throughput (ops/s)", ({ bench }) =>
+  bench?.mixedWorkload?.failed ? "FAILED (see caveats)" : bench?.mixedWorkload?.throughputOpsPerSec
+));
 
 const out = lines.join("\n");
 console.log(out);

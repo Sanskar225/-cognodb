@@ -84,6 +84,15 @@ async function runMixedWorkload(adapter, sampleIds) {
   };
 }
 
+async function safeRunWorkload(adapter, name, queryText, sampleIds, sampleInternalIds) {
+  try {
+    return await runWorkload(adapter, name, queryText, sampleIds, sampleInternalIds);
+  } catch (e) {
+    console.warn(`  ${name}: FAILED (${e.message}) -- recording as a caveat, continuing.`);
+    return { failed: true, error: e.message };
+  }
+}
+
 async function main() {
   const platformName = process.argv[2];
   if (!platformName) {
@@ -97,33 +106,46 @@ async function main() {
 
   const results = { platform: platformName, config: BENCH, ranAt: new Date().toISOString() };
 
-  results.hop1 = await runWorkload(adapter, "1-hop traversal", adapter.queries.hop1, sampleIds);
-  results.hop2 = await runWorkload(adapter, "2-hop traversal", adapter.queries.hop2, sampleIds);
-  results.hop3 = await runWorkload(adapter, "3-hop traversal", adapter.queries.hop3, sampleIds);
+  results.hop1 = await safeRunWorkload(adapter, "1-hop traversal", adapter.queries.hop1, sampleIds);
+  results.hop2 = await safeRunWorkload(adapter, "2-hop traversal", adapter.queries.hop2, sampleIds);
+  results.hop3 = await safeRunWorkload(adapter, "3-hop traversal", adapter.queries.hop3, sampleIds);
 
   let pointLookupNote = null;
   let sampleInternalIds = null;
-  if (typeof adapter.getSampleInternalIds === "function") {
-    sampleInternalIds = await adapter.getSampleInternalIds(Math.max(BENCH.iterations, 200));
-  } else {
-    pointLookupNote = "No native internal-id lookup on this platform; reused the indexed-lookup query (see README caveats).";
+  try {
+    if (typeof adapter.getSampleInternalIds === "function") {
+      sampleInternalIds = await adapter.getSampleInternalIds(Math.max(BENCH.iterations, 200));
+    } else {
+      pointLookupNote = "No native internal-id lookup on this platform; reused the indexed-lookup query (see README caveats).";
+    }
+  } catch (e) {
+    pointLookupNote = `Could not fetch internal ids (${e.message}); reused the indexed-lookup query.`;
   }
-  results.pointLookup = await runWorkload(
+  results.pointLookup = await safeRunWorkload(
     adapter,
     "point lookup",
     sampleInternalIds ? adapter.queries.pointLookup : adapter.queries.indexedLookup,
     sampleIds,
     sampleInternalIds
   );
-  if (pointLookupNote) results.pointLookup.note = pointLookupNote;
+  if (pointLookupNote && !results.pointLookup.failed) results.pointLookup.note = pointLookupNote;
 
-  results.indexedLookup = await runWorkload(adapter, "indexed lookup", adapter.queries.indexedLookup, sampleIds);
-  results.aggregation = await runWorkload(adapter, "aggregation (count edges)", adapter.queries.aggregation, sampleIds);
+  results.indexedLookup = await safeRunWorkload(adapter, "indexed lookup", adapter.queries.indexedLookup, sampleIds);
+  results.aggregation = await safeRunWorkload(adapter, "aggregation (count edges)", adapter.queries.aggregation, sampleIds);
 
   console.log("  mixed read/write workload...");
-  results.mixedWorkload = await runMixedWorkload(adapter, sampleIds);
+  try {
+    results.mixedWorkload = await runMixedWorkload(adapter, sampleIds);
+  } catch (e) {
+    console.warn(`  mixed workload: FAILED (${e.message}) -- recording as a caveat, continuing.`);
+    results.mixedWorkload = { failed: true, error: e.message };
+  }
 
-  await adapter.close();
+  try {
+    await adapter.close();
+  } catch (e) {
+    console.warn(`  (non-fatal) error closing connection: ${e.message}`);
+  }
 
   fs.mkdirSync("results", { recursive: true });
   fs.writeFileSync(`results/${platformName}-bench.json`, JSON.stringify(results, null, 2));

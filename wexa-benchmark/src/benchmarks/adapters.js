@@ -63,7 +63,13 @@ export async function getAdapter(platformName) {
     return {
       queries: AQL,
       async run(queryText, params) {
-        const cursor = await db.query({ query: queryText, bindVars: params });
+        // AQL rejects bind vars that aren't referenced in the query text
+        // (unlike Cypher, which ignores extras) -- strip anything unused
+        // so the same generic params object can be passed for every query.
+        const usedKeys = new Set([...queryText.matchAll(/@(\w+)/g)].map((m) => m[1]));
+        const bindVars = {};
+        for (const k of usedKeys) if (params && k in params) bindVars[k] = params[k];
+        const cursor = await db.query({ query: queryText, bindVars });
         await cursor.all();
       },
       // ArangoDB has no separate "unindexed internal id" concept -- _key IS
