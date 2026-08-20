@@ -34,17 +34,20 @@ async function timeQuery(adapter, queryText, params) {
   return performance.now() - t0;
 }
 
-async function runWorkload(adapter, name, queryText, sampleIds) {
+async function runWorkload(adapter, name, queryText, sampleIds, sampleInternalIds) {
+  const useInternal = Array.isArray(sampleInternalIds) && sampleInternalIds.length > 0;
+  const getParams = (i) => ({
+    id: sampleIds[i % sampleIds.length],
+    internalId: useInternal ? sampleInternalIds[i % sampleInternalIds.length] : 0,
+  });
   // warm-up
   for (let i = 0; i < BENCH.warmup; i++) {
-    const id = sampleIds[i % sampleIds.length];
-    await timeQuery(adapter, queryText, { id, internalId: 0 });
+    await timeQuery(adapter, queryText, getParams(i));
   }
   // measured
   const latencies = [];
   for (let i = 0; i < BENCH.iterations; i++) {
-    const id = sampleIds[i % sampleIds.length];
-    latencies.push(await timeQuery(adapter, queryText, { id, internalId: 0 }));
+    latencies.push(await timeQuery(adapter, queryText, getParams(i)));
   }
   const summary = summarizeLatencies(latencies);
   console.log(`  ${name}: p50=${summary.p50}ms p95=${summary.p95}ms`);
@@ -97,6 +100,23 @@ async function main() {
   results.hop1 = await runWorkload(adapter, "1-hop traversal", adapter.queries.hop1, sampleIds);
   results.hop2 = await runWorkload(adapter, "2-hop traversal", adapter.queries.hop2, sampleIds);
   results.hop3 = await runWorkload(adapter, "3-hop traversal", adapter.queries.hop3, sampleIds);
+
+  let pointLookupNote = null;
+  let sampleInternalIds = null;
+  if (typeof adapter.getSampleInternalIds === "function") {
+    sampleInternalIds = await adapter.getSampleInternalIds(Math.max(BENCH.iterations, 200));
+  } else {
+    pointLookupNote = "No native internal-id lookup on this platform; reused the indexed-lookup query (see README caveats).";
+  }
+  results.pointLookup = await runWorkload(
+    adapter,
+    "point lookup",
+    sampleInternalIds ? adapter.queries.pointLookup : adapter.queries.indexedLookup,
+    sampleIds,
+    sampleInternalIds
+  );
+  if (pointLookupNote) results.pointLookup.note = pointLookupNote;
+
   results.indexedLookup = await runWorkload(adapter, "indexed lookup", adapter.queries.indexedLookup, sampleIds);
   results.aggregation = await runWorkload(adapter, "aggregation (count edges)", adapter.queries.aggregation, sampleIds);
 

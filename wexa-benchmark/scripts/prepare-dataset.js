@@ -12,7 +12,8 @@ import fs from "fs";
 import readline from "readline";
 
 const RAW_PATH = "data/raw/soc-pokec-relationships.txt";
-const TARGET_EDGES = parseInt(process.argv[2] || "150000", 10);
+// Kept under Neo4j AuraDB Free's 175,000-relationship cap with safety margin.
+const TARGET_EDGES = parseInt(process.argv[2] || "120000", 10);
 const SEED_NODE_COUNT = Math.round(TARGET_EDGES / 6); // heuristic, tuned below
 
 async function main() {

@@ -19,6 +19,21 @@ export async function getAdapter(platformName) {
           await session.close();
         }
       },
+      // Point lookup uses the database's own internal node identity (no
+      // application index involved) -- fetch a sample of real internal ids
+      // once so the point-lookup workload hits real, varied nodes.
+      async getSampleInternalIds(n) {
+        const session = driver.session();
+        try {
+          const res = await session.run(
+            `MATCH (p:Person) RETURN id(p) AS iid LIMIT $n`,
+            { n: neo4j.int(n) }
+          );
+          return res.records.map((r) => r.get("iid"));
+        } finally {
+          await session.close();
+        }
+      },
       async close() {
         await driver.close();
       },
@@ -32,6 +47,10 @@ export async function getAdapter(platformName) {
       queries: CYPHER,
       async run(queryText, params) {
         await graph.query(queryText, { params });
+      },
+      async getSampleInternalIds(n) {
+        const res = await graph.query(`MATCH (p:Person) RETURN id(p) AS iid LIMIT ${n}`);
+        return (res.data || []).map((row) => row.iid);
       },
       async close() {
         await client.close();
@@ -47,6 +66,11 @@ export async function getAdapter(platformName) {
         const cursor = await db.query({ query: queryText, bindVars: params });
         await cursor.all();
       },
+      // ArangoDB has no separate "unindexed internal id" concept -- _key IS
+      // the primary index, so point lookup and indexed lookup are
+      // necessarily the same operation here. No getSampleInternalIds ->
+      // runBenchmark.js falls back to reusing the indexed-lookup query and
+      // notes this equivalence as a caveat in the README.
       async close() {},
     };
   }

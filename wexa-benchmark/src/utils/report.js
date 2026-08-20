@@ -29,6 +29,7 @@ lines.push(row("Relationships/sec", ({ load }) => load?.relsPerSec));
 lines.push(row("1-hop p50/p95 (ms)", ({ bench }) => bench && `${bench.hop1.p50} / ${bench.hop1.p95}`));
 lines.push(row("2-hop p50/p95 (ms)", ({ bench }) => bench && `${bench.hop2.p50} / ${bench.hop2.p95}`));
 lines.push(row("3-hop p50/p95 (ms)", ({ bench }) => bench && `${bench.hop3.p50} / ${bench.hop3.p95}`));
+lines.push(row("Point lookup p50/p95 (ms)", ({ bench }) => bench && `${bench.pointLookup.p50} / ${bench.pointLookup.p95}`));
 lines.push(row("Indexed lookup p50/p95 (ms)", ({ bench }) => bench && `${bench.indexedLookup.p50} / ${bench.indexedLookup.p95}`));
 lines.push(row("Aggregation p50/p95 (ms)", ({ bench }) => bench && `${bench.aggregation.p50} / ${bench.aggregation.p95}`));
 lines.push(row("Mixed workload throughput (ops/s)", ({ bench }) => bench?.mixedWorkload?.throughputOpsPerSec));
