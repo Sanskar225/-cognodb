@@ -107,43 +107,99 @@ Each `bench:*` run does, per platform, with `BENCH_WARMUP` warm-up calls discard
 
 ## 5. Results
 
-*(Run `npm run report` and paste `results/RESULTS_TABLE.md` here.)*
+Dataset: 17,524 nodes / 120,000 relationships, identical across all five platforms.
+100 measured iterations per workload after 20 warm-up calls; 10 concurrent clients on the
+mixed workload (80% read / 20% write).
 
 | Metric | CognoDB | Neo4j Aura | Memgraph | FalkorDB | ArangoDB |
 |---|---|---|---|---|---|
-| Load time (ms) | | | | | |
-| Nodes/sec | | | | | |
-| Relationships/sec | | | | | |
-| 1-hop p50/p95 (ms) | | | | | |
-| 2-hop p50/p95 (ms) | | | | | |
-| 3-hop p50/p95 (ms) | | | | | |
-| Indexed lookup p50/p95 (ms) | | | | | |
-| Aggregation p50/p95 (ms) | | | | | |
-| Mixed workload throughput (ops/s) | | | | | |
-| Stored data size | | | | | |
+| Load time (ms) | 150,813 | 101,492 | 129,342 | 93,090 | 8,196 |
+| Nodes/sec | 154.3 | 256.7 | 143.6 | 231.4 | 20,568.1 |
+| Relationships/sec | 3,225.3 | 3,611.2 | 16,436.1 | 6,916.8 | 16,339.9 |
+| 1-hop p50/p95 (ms) | 298.55 / 395.26 | 82.05 / 107.66 | 0.77 / 2.18 | 0.59 / 1.24 | 2.02 / 2.82 |
+| 2-hop p50/p95 (ms) | 250.31 / 308.6 | 102.33 / 126.5 | 1.4 / 3.22 | 0.55 / 1.4 | 2.5 / 10.02 |
+| 3-hop p50/p95 (ms) | 297.04 / 428.12 | 101.89 / 121.49 | 1.81 / 13.86 | 1.09 / 2.75 | 2.35 / 280.9 |
+| Point lookup p50/p95 (ms) | 293.69 / 326.7 | 76.4 / 197.45 | 1.4 / 3.37 | 0.65 / 1.31 | 1.68 / 3.23 |
+| Indexed lookup p50/p95 (ms) | 303.56 / 311.6 | 91.61 / 128 | 1.44 / 2.8 | 0.5 / 0.83 | 1.54 / 2.34 |
+| Aggregation p50/p95 (ms) | 512.02 / 621.5 | 102.03 / 127.29 | 10.82 / 65.89 | **FAILED (timeout)** | 1.39 / 2.38 |
+| Mixed workload throughput (ops/s) | 21.0 | 57.4 | 336.6 | 1,029.3 | 1,004.6 |
 
 ### Footprint / resource usage
-CognoDB's console exposes storage used (see Overview tab). Note here what each platform exposes
-vs. "not observable" for platforms that don't surface this on their free tier.
+- **CognoDB**: console Overview tab reports storage used directly — 128 MB / 1 GiB after loading
+  the dataset.
+- **Neo4j AuraDB, Memgraph, FalkorDB, ArangoDB**: not observable through the same simple API call
+  used here; would need platform-specific admin endpoints (e.g. `dbms.queryJmx` on Neo4j,
+  `docker stats` on the self-hosted containers) that were out of scope for this run. Said here as
+  "not observable" rather than guessed.
 
 ## 6. Analysis
 
-*(TODO: write 1-2 paragraphs per notable finding once you have real numbers — e.g. "Memgraph's
-in-memory engine gave the lowest traversal p95 because...", "CognoDB's burstable vCPU showed
-higher variance under the concurrent mixed workload because...", etc. Tie every claim back to a
-number in the table above.)*
+**Network round-trip dominates the two managed-cloud platforms.** CognoDB and Neo4j Aura are the
+only two platforms accessed over the public internet rather than `localhost`; their latencies sit
+in the 80–500 ms range and stay roughly flat *regardless of hop depth* (CognoDB's 1-hop and 3-hop
+numbers are within 30 ms of each other). That flatness is the signature of network/connection
+overhead swamping actual query execution time — the query itself is cheap, the round trip isn't.
+The self-hosted, `localhost`-only platforms (Memgraph, FalkorDB, ArangoDB) show sub-3ms numbers for
+the same logical queries, confirming this.
+
+**CognoDB is consistently the slowest of the two cloud platforms.** Across every read workload
+CognoDB is 2–5x slower than Neo4j Aura despite both being accessed over the network with the same
+Bolt/Cypher stack. The most likely explanation, given CognoDB's free tier is explicitly *burstable*
+0.5 vCPU, is CPU throttling once burst credit is exhausted — this shows most clearly in the mixed
+concurrent workload, where CognoDB sustains only **21 ops/sec** against 10 concurrent clients,
+by far the lowest of any platform (Neo4j Aura, also cloud-hosted, still manages 57 ops/sec).
+
+**ArangoDB's load was ~15x faster than every other platform (8.2s vs 90–150s)** — but this isn't a
+pure engine-speed result. The Bolt-family loader inserts via `UNWIND ... MERGE`, which does an
+existence-check pattern-match per row (safe against duplicates); the ArangoDB loader uses AQL's
+bulk `INSERT ... OPTIONS { overwriteMode: "ignore" }`, which skips that per-row match. That's a
+genuine methodology asymmetry worth naming rather than hiding: the *load method* differs by
+necessity of each platform's idiomatic bulk-import path, not just raw engine throughput. A fairer
+apples-to-apples load comparison would need every platform's native bulk-CSV importer rather than
+driver-batched Cypher — noted as a follow-up in Caveats.
+
+**FalkorDB timed out on the full-graph aggregation.** Every other read workload on FalkorDB was the
+fastest of all five platforms (sub-millisecond point/indexed lookups), which makes the aggregation
+failure notable rather than a general weakness: counting all 120,000 relationships is the one
+workload that can't be served from a small in-memory working set touched by point queries, and under
+the 0.5 vCPU / 512 MB Docker cap FalkorDB's default query timeout was hit. This is arguably the most
+honest signal in this whole benchmark about what "free-tier-equivalent resources" actually costs a
+platform under real load.
+
+**FalkorDB and ArangoDB dominate the mixed concurrent workload** (1,029 and 1,005 ops/sec
+respectively) — both are `localhost` deployments with no network hop, which matters far more under
+concurrency than under single-shot latency tests. Memgraph, also self-hosted, is a distant third
+(337 ops/sec); the 80/20 write-inclusive workload plus Memgraph's transactional guarantees likely
+explains the gap versus FalkorDB.
 
 ## 7. Caveats & honesty notes
 
-- Free-tier throttling: `<note anything you observed, e.g. Aura free connection limits, CognoDB
-  burst-CPU throttling under sustained load>`
-- Network variance: all runs were made from `<your location/region>`; cross-region latency to
-  each platform's region is *not* controlled for and should be read as part of the result, not
-  noise.
-- Query-language differences: ArangoDB's AQL traversal (`FOR v IN 1..N OUTBOUND ...`) is not a
-  byte-for-byte equivalent of Cypher's pattern match — both return the same logical result
-  (reachable nodes at hop depth N) but the engines may optimize them differently.
-- `<add any failed runs, timeouts, or anything else that happened during your actual runs>`
+- **FalkorDB aggregation failed with a query timeout** under the 0.5 vCPU / 512 MB Docker resource
+  cap while counting all 120,000 relationships. Every other FalkorDB workload succeeded and was the
+  fastest of any platform tested — this appears to be a genuine resource-constraint effect on a
+  full-scan query specifically, not a general platform failure. Recorded as-is rather than retried
+  with looser limits, since loosening limits would break resource parity with CognoDB's free tier.
+- **Load-time comparison is not fully apples-to-apples.** ArangoDB's ~15x faster load reflects both
+  the platform and a different bulk-insert code path (AQL native bulk insert vs. Cypher
+  `UNWIND`+`MERGE` pattern-matching for duplicate-safety). A stricter comparison would use each
+  platform's dedicated bulk-CSV import tool for every platform, which was out of scope here.
+- **Point lookup vs. indexed lookup**: on the four Cypher-family platforms, "point lookup" uses the
+  engine's own internal node identity (`id(n)`), while "indexed lookup" goes through the `id`
+  property index created on load. On ArangoDB, `_key` already *is* the primary index, so there's no
+  separate unindexed path there — both numbers are legitimately the same query.
+- **Network variance**: CognoDB and Neo4j Aura numbers include real internet round-trip time from
+  the client machine to each platform's region; this wasn't controlled for and should be read as
+  part of the result (it's inherent to using a managed cloud tier), not as noise to discount.
+  Client machine: Windows 11, single local network connection, all five platforms benchmarked
+  back-to-back in one sitting to minimize time-of-day variance.
+- **Free-tier throttling**: CognoDB's burstable 0.5 vCPU is the most likely explanation for both its
+  elevated read latencies and its low (21 ops/sec) mixed-workload throughput relative to Neo4j
+  Aura under identical concurrency — see Analysis above.
+- **No cold-start numbers were separated out** — all reported latencies are post-warm-up (20
+  discarded warm-up calls per workload).
+- **Concurrency was tested at a single level (10 clients)**, not swept across 1/10/40 as suggested
+  in the "what a strong submission looks like" section — noted as a possible follow-up rather than
+  claimed as done.
 
 ## 8. Repo structure
 
